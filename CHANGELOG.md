@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0] — Projects 1 + 2
+- Wafer-level uniformity analysis (center-vs-edge, radial trends, FSR-to-index, IV uniformity)
+- V-phi extraction: Vπ, Vπ·L, ER from existing dλ/dV data
+- New CLI: `picqa uniformity`, `picqa phase`
+- New plot kinds: radial, center_vs_edge, vphi, vpi
+- 14 new tests; integrated into unified report (now 11 figures + 11 CSVs)
+
+
 All notable changes to this project will be documented in this file.
 
 ## [1.0.0] — Initial release
