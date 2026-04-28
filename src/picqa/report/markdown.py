@@ -183,6 +183,69 @@ def generate_report(
             fig_paths["pn_length"] = None
             fig_paths["pn_summary"] = None
 
+    # Project 1: wafer-level uniformity analysis
+    uniformity_dfs = {}
+    try:
+        from picqa.analysis.wafer_uniformity import (
+            center_vs_edge,
+            fsr_to_index_variation,
+            iv_uniformity,
+        )
+        from picqa.viz.uniformity_plot import (
+            plot_center_vs_edge,
+            plot_radial_dependence,
+        )
+        uniformity_dfs["cve_il"] = center_vs_edge(
+            features, "PeakIL_near_1310_dB", group_by=["Wafer"]
+        )
+        uniformity_dfs["fsr_var"] = fsr_to_index_variation(
+            features, group_by=["Wafer", "Session"]
+        )
+        uniformity_dfs["iv_uni"] = iv_uniformity(
+            features, metric="I_at_-1V_pA", group_by=["Wafer", "Session"]
+        )
+        uniformity_dfs["cve_il"].to_csv(out_dir / "center_vs_edge_il.csv", index=False)
+        uniformity_dfs["fsr_var"].to_csv(out_dir / "fsr_index_variation.csv", index=False)
+        uniformity_dfs["iv_uni"].to_csv(out_dir / "iv_uniformity.csv", index=False)
+        fig_paths["radial_il"] = plot_radial_dependence(
+            features, "PeakIL_near_1310_dB", fig_dir / "radial_il.png",
+            title="Grating coupler IL vs wafer radius",
+        )
+        fig_paths["center_vs_edge"] = plot_center_vs_edge(
+            features,
+            ["FSR_nm", "PeakIL_near_1310_dB", "I_at_-1V_pA"],
+            fig_dir / "center_vs_edge.png",
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Uniformity analysis skipped: %s", exc)
+
+    # Project 2: V-phi extraction (Vπ, Vπ·L, ER)
+    phase_df = pd.DataFrame()
+    try:
+        from picqa.analysis.phase_extraction import extract_phase_features
+        from picqa.viz.uniformity_plot import plot_vpi_distribution, plot_vphi_curve
+        phase_df = extract_phase_features(measurements, features)
+        phase_df.to_csv(out_dir / "phase_features.csv", index=False)
+        # Pick a representative working die for the V-phi curve
+        good = phase_df[~phase_df.get("FailedContact", pd.Series(False, index=phase_df.index))]
+        if not good.empty:
+            row0 = good.iloc[0]
+            target = next(
+                (m for m in measurements
+                 if m.wafer == row0["Wafer"] and m.session == row0["Session"]
+                 and m.die == row0["Die"]),
+                None,
+            )
+            if target is not None:
+                fig_paths["vphi"] = plot_vphi_curve(target, fig_dir / "vphi_curve.png")
+        fig_paths["vpi_dist"] = plot_vpi_distribution(
+            phase_df, fig_dir / "vpi_distribution.png"
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Phase extraction skipped: %s", exc)
+
     # Statistics
     stats = per_group_stats(features, group_by=["Wafer", "Session"], metrics=METRICS_FOR_STATS)
     stats.to_csv(out_dir / "stats_per_session.csv", index=False)
@@ -250,6 +313,62 @@ def generate_report(
     if yield_section:
         lines.append(yield_section)
 
+    # Project 1: wafer-level uniformity analysis
+    if uniformity_dfs:
+        lines.append("## Project 1 — Wafer-level process uniformity")
+        lines.append("")
+        if "cve_il" in uniformity_dfs and not uniformity_dfs["cve_il"].empty:
+            lines.append("### Grating coupler IL: center vs edge dies")
+            lines.append("")
+            lines.append("Edge_radius threshold = 2.5 die-units (R ≤ 2.5 → center).")
+            lines.append("")
+            lines.append(_df_to_md(uniformity_dfs["cve_il"]))
+            lines.append("")
+        if "fsr_var" in uniformity_dfs and not uniformity_dfs["fsr_var"].empty:
+            lines.append("### FSR variation → implied geometry / index variation")
+            lines.append("")
+            lines.append("`FSR_relative_variation_pct = σ(FSR) / mean(FSR) × 100`. "
+                         "For an unbalanced MZI, this approximates Δn_g/n_g, which in turn "
+                         "reflects waveguide width / thickness uniformity across the wafer.")
+            lines.append("")
+            lines.append(_df_to_md(uniformity_dfs["fsr_var"]))
+            lines.append("")
+        if "iv_uni" in uniformity_dfs and not uniformity_dfs["iv_uni"].empty:
+            lines.append("### IV uniformity (leakage at -1 V)")
+            lines.append("")
+            lines.append("Per-session statistics including robust median + MAD-based σ "
+                         "alongside parametric mean / std / CV. Sessions with failed contact "
+                         "show extremely low absolute means (~100 pA) compared to working "
+                         "ones (10⁴–10⁵ pA).")
+            lines.append("")
+            lines.append(_df_to_md(uniformity_dfs["iv_uni"]))
+            lines.append("")
+
+    # Project 2: V-phi
+    if not phase_df.empty:
+        lines.append("## Project 2 — Voltage-based phase modulator characterisation")
+        lines.append("")
+        n_with_vpi = int(phase_df["Vpi_V"].notna().sum())
+        lines.append(f"Extracted Vπ, Vπ·L, and extinction ratio for {n_with_vpi}/{len(phase_df)} dies. "
+                     f"Vπ = FSR / (2·|dλ/dV|). Phase-shifter length is parsed best-effort from "
+                     f"the device name; if absent, Vπ·L is left as NaN.")
+        lines.append("")
+        per_wafer_vpi = (
+            phase_df[~phase_df["FailedContact"]]
+            .groupby("Wafer")[["Vpi_V", "Vpi_L_V_cm", "ER_at_-2V_dB"]]
+            .agg(["count", "median", "std"])
+            .round(3)
+        )
+        if not per_wafer_vpi.empty:
+            lines.append("### Per-wafer Vπ summary (working dies)")
+            lines.append("")
+            # Flatten multi-index columns for prettier markdown
+            flat = per_wafer_vpi.copy()
+            flat.columns = [f"{a}_{b}" for a, b in flat.columns]
+            flat = flat.reset_index()
+            lines.append(_df_to_md(flat))
+            lines.append("")
+
     # PN modulator section
     if not pn_seg_df.empty:
         lines.append("## PN modulator (PCM_PSLOTE_P1N1) analysis")
@@ -293,6 +412,22 @@ def generate_report(
     if fig_paths.get("pn_summary"):
         lines.append("### PN modulator summary panels")
         lines.append(f"![PN summary]({fig_paths['pn_summary'].relative_to(out_dir)})")
+        lines.append("")
+    if fig_paths.get("radial_il"):
+        lines.append("### (Project 1) Grating coupler IL vs wafer radius")
+        lines.append(f"![Radial IL]({fig_paths['radial_il'].relative_to(out_dir)})")
+        lines.append("")
+    if fig_paths.get("center_vs_edge"):
+        lines.append("### (Project 1) Center vs edge boxplots")
+        lines.append(f"![Center vs edge]({fig_paths['center_vs_edge'].relative_to(out_dir)})")
+        lines.append("")
+    if fig_paths.get("vphi"):
+        lines.append("### (Project 2) Representative V-φ curve")
+        lines.append(f"![V-phi curve]({fig_paths['vphi'].relative_to(out_dir)})")
+        lines.append("")
+    if fig_paths.get("vpi_dist"):
+        lines.append("### (Project 2) Vπ distribution and Vπ·L figure of merit")
+        lines.append(f"![Vπ distribution]({fig_paths['vpi_dist'].relative_to(out_dir)})")
         lines.append("")
 
     md_path = out_dir / "report.md"
