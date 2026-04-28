@@ -15,13 +15,19 @@ silicon photonic process runs. Designed around the HY202103 dataset format
 - **Length-dependent analysis** for PN modulators: per-µm doping loss and
   electroabsorption modulation efficiency by linear fit across three
   segment lengths
+- **Wafer-level uniformity (project 1)**: center-vs-edge comparison,
+  radial dependence, FSR-to-index-variation mapping, IV uniformity
+- **V-phi extraction (project 2)**: Vπ, Vπ·L, and extinction ratio derived
+  from the bias-dependent notch shift
 - **Spec-based yield calculation** from a YAML rule file
 - **Automatic failed-contact detection** via leakage + tuning-slope thresholds
 - **Publication-quality plots**: IV curves, transmission spectra, bias-shift
   comparisons, wafer maps, six-panel MZM summary, PN length-dependence,
-  PN trade-off summary
+  PN trade-off summary, radial-IL trend, center-vs-edge boxplots, V-φ curves,
+  Vπ distribution
 - **Markdown report generator** that bundles inventory, statistics,
-  yield results, MZM features, PN features, and figures into one file
+  yield results, MZM features, PN features, project-1 uniformity, project-2
+  V-phi, and figures into one file
 - **CLI** for every operation — no GUI, no notebook required
 
 ## Installation
