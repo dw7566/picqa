@@ -105,6 +105,26 @@ def generate_report(
     features = flag_failed_contacts(features)
     features.to_csv(out_dir / "mzm_features.csv", index=False)
 
+    # PN modulator analysis (independent parser/extractor)
+    pn_seg_df = pd.DataFrame()
+    pn_fit_df = pd.DataFrame()
+    try:
+        from picqa.extract.pn_modulator import (
+            extract_pn_length_fit,
+            extract_pn_segment_features,
+        )
+        from picqa.io.pn_parser import parse_pn_directory
+        pn_measurements = parse_pn_directory(data_dir)
+        if pn_measurements:
+            pn_seg_df = extract_pn_segment_features(pn_measurements)
+            pn_fit_df = extract_pn_length_fit(pn_seg_df)
+            pn_seg_df.to_csv(out_dir / "pn_segments.csv", index=False)
+            pn_fit_df.to_csv(out_dir / "pn_length_fit.csv", index=False)
+    except Exception as exc:
+        # PN data is optional; don't break the whole report
+        import logging
+        logging.getLogger(__name__).warning("PN analysis skipped: %s", exc)
+
     # Figures (skip gracefully if data missing)
     fig_paths: dict[str, Path | None] = {}
     try:
@@ -147,6 +167,21 @@ def generate_report(
         fig_paths["summary"] = plot_summary(features, fig_dir / "summary.png")
     except Exception:
         fig_paths["summary"] = None
+
+    # PN figures
+    if not pn_seg_df.empty:
+        try:
+            from picqa.viz.pn_plot import plot_pn_length_dependence, plot_pn_summary
+            fig_paths["pn_length"] = plot_pn_length_dependence(
+                pn_seg_df, fig_dir / "pn_length.png"
+            )
+            if not pn_fit_df.empty:
+                fig_paths["pn_summary"] = plot_pn_summary(
+                    pn_fit_df, fig_dir / "pn_summary.png"
+                )
+        except Exception:
+            fig_paths["pn_length"] = None
+            fig_paths["pn_summary"] = None
 
     # Statistics
     stats = per_group_stats(features, group_by=["Wafer", "Session"], metrics=METRICS_FOR_STATS)
@@ -215,27 +250,49 @@ def generate_report(
     if yield_section:
         lines.append(yield_section)
 
+    # PN modulator section
+    if not pn_seg_df.empty:
+        lines.append("## PN modulator (PCM_PSLOTE_P1N1) analysis")
+        lines.append("")
+        lines.append(f"Extracted {len(pn_seg_df)} segment rows over {len(pn_fit_df)} dies. "
+                     f"Each die has three PN segments (typically 500 / 1500 / 2500 µm) plus a "
+                     f"reference waveguide; per-µm doping loss and electroabsorption "
+                     f"modulation efficiency are obtained by linear fits versus segment length.")
+        lines.append("")
+        lines.append("### Per-die length-fit results (first 20 rows)")
+        lines.append("")
+        lines.append(_df_to_md(pn_fit_df.head(20)))
+        lines.append("")
+
     lines.append("## Figures")
     lines.append("")
     if fig_paths.get("iv"):
-        lines.append("### IV characteristics")
+        lines.append("### IV characteristics (MZM)")
         lines.append(f"![IV]({fig_paths['iv'].relative_to(out_dir)})")
         lines.append("")
     if fig_paths.get("spectra"):
-        lines.append("### Transmission spectra @ -2V")
+        lines.append("### Transmission spectra @ -2V (MZM)")
         lines.append(f"![Spectra]({fig_paths['spectra'].relative_to(out_dir)})")
         lines.append("")
     if fig_paths.get("bias"):
-        lines.append("### Bias-dependent spectrum (representative die)")
+        lines.append("### Bias-dependent spectrum (representative MZM die)")
         lines.append(f"![Bias shift]({fig_paths['bias'].relative_to(out_dir)})")
         lines.append("")
     if fig_paths.get("wafermap"):
-        lines.append("### Wafer maps")
+        lines.append("### MZM wafer maps")
         lines.append(f"![Wafer maps]({fig_paths['wafermap'].relative_to(out_dir)})")
         lines.append("")
     if fig_paths.get("summary"):
-        lines.append("### Summary panels")
+        lines.append("### MZM summary panels")
         lines.append(f"![Summary]({fig_paths['summary'].relative_to(out_dir)})")
+        lines.append("")
+    if fig_paths.get("pn_length"):
+        lines.append("### PN modulator length dependence")
+        lines.append(f"![PN length]({fig_paths['pn_length'].relative_to(out_dir)})")
+        lines.append("")
+    if fig_paths.get("pn_summary"):
+        lines.append("### PN modulator summary panels")
+        lines.append(f"![PN summary]({fig_paths['pn_summary'].relative_to(out_dir)})")
         lines.append("")
 
     md_path = out_dir / "report.md"

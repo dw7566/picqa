@@ -68,6 +68,34 @@ def cmd_parse(args: argparse.Namespace) -> int:
 
 def cmd_extract(args: argparse.Namespace) -> int:
     test_site_map = {"mzm": "DCM_LMZO", "pd": "DCM_GPDO"}
+
+    if args.device == "pn":
+        # PN modulator uses a different parser/extractor pair because its XML
+        # layout (multiple PortCombo segments) doesn't fit the generic
+        # Measurement schema.
+        from picqa.extract.pn_modulator import (
+            extract_pn_length_fit,
+            extract_pn_segment_features,
+        )
+        from picqa.io.pn_parser import parse_pn_directory
+
+        measurements = parse_pn_directory(args.data_dir)
+        seg_df = extract_pn_segment_features(measurements)
+        fit_df = extract_pn_length_fit(seg_df)
+
+        print(f"Extracted {len(seg_df)} segment rows over {len(fit_df)} dies")
+        if args.output:
+            out = Path(args.output)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            seg_df.to_csv(out, index=False)
+            fit_path = out.with_name(out.stem + "_lengthfit.csv")
+            fit_df.to_csv(fit_path, index=False)
+            print(f"Per-segment → {out}")
+            print(f"Length fit  → {fit_path}")
+        else:
+            print(seg_df.head().to_string(index=False))
+        return 0
+
     test_site = test_site_map.get(args.device)
     measurements = parse_directory(args.data_dir, test_site=test_site)
 
@@ -106,6 +134,14 @@ def cmd_plot(args: argparse.Namespace) -> int:
     elif args.kind == "summary":
         df = pd.read_csv(args.input)
         plot_summary(df, out)
+    elif args.kind == "pn_length":
+        from picqa.viz.pn_plot import plot_pn_length_dependence
+        df = pd.read_csv(args.input)
+        plot_pn_length_dependence(df, out)
+    elif args.kind == "pn_summary":
+        from picqa.viz.pn_plot import plot_pn_summary
+        df = pd.read_csv(args.input)
+        plot_pn_summary(df, out)
     else:
         print(f"Unknown plot kind: {args.kind}", file=sys.stderr)
         return 2
@@ -169,15 +205,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     # extract
     sp = sub.add_parser("extract", help="extract device features to CSV")
-    sp.add_argument("device", choices=["mzm", "pd"])
+    sp.add_argument("device", choices=["mzm", "pd", "pn"])
     sp.add_argument("data_dir")
     sp.add_argument("--output", "-o", default=None)
     sp.set_defaults(func=cmd_extract)
 
     # plot
     sp = sub.add_parser("plot", help="generate a figure")
-    sp.add_argument("kind", choices=["iv", "spectra", "wafermap", "summary"])
-    sp.add_argument("input", help="data directory (iv/spectra) or features CSV (wafermap/summary)")
+    sp.add_argument("kind",
+                    choices=["iv", "spectra", "wafermap", "summary",
+                             "pn_length", "pn_summary"])
+    sp.add_argument("input", help="data directory (iv/spectra) or features CSV (others)")
     sp.add_argument("--output", "-o", required=True)
     sp.add_argument("--bias", type=float, default=-2.0,
                     help="DC bias for spectra plot (default: -2.0 V)")
