@@ -4,6 +4,7 @@ import argparse, logging, pickle, sys
 from pathlib import Path
 from picqa import __version__
 from picqa.extract.mzm import extract_mzm_features
+from picqa.extract.photodetector import extract_pd_features
 from picqa.io.xml_parser import inventory, parse_directory
 
 
@@ -27,8 +28,12 @@ def cmd_parse(args):
 
 
 def cmd_extract(args):
-    measurements = parse_directory(args.data_dir, test_site="DCM_LMZO")
-    df = extract_mzm_features(measurements)
+    test_site_map = {"mzm": "DCM_LMZO", "pd": "DCM_GPDO"}
+    measurements = parse_directory(args.data_dir, test_site=test_site_map[args.device])
+    if args.device == "mzm":
+        df = extract_mzm_features(measurements)
+    else:
+        df = extract_pd_features(measurements)
     if args.output:
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -49,7 +54,7 @@ def main(argv=None):
     sp.add_argument("data_dir"); sp.add_argument("--test-site"); sp.add_argument("-o", "--output")
     sp.set_defaults(func=cmd_parse)
     sp = sub.add_parser("extract")
-    sp.add_argument("device", choices=["mzm"])
+    sp.add_argument("device", choices=["mzm", "pd"])
     sp.add_argument("data_dir"); sp.add_argument("-o", "--output")
     sp.set_defaults(func=cmd_extract)
 
