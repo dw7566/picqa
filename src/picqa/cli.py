@@ -142,6 +142,42 @@ def cmd_plot(args: argparse.Namespace) -> int:
         from picqa.viz.pn_plot import plot_pn_summary
         df = pd.read_csv(args.input)
         plot_pn_summary(df, out)
+    elif args.kind == "radial":
+        from picqa.viz.uniformity_plot import plot_radial_dependence
+        df = pd.read_csv(args.input)
+        if not args.metric:
+            print("--metric required for radial plot", file=sys.stderr)
+            return 2
+        plot_radial_dependence(df, args.metric, out)
+    elif args.kind == "center_vs_edge":
+        from picqa.viz.uniformity_plot import plot_center_vs_edge
+        df = pd.read_csv(args.input)
+        # metric is comma-separated list of columns
+        metrics = [args.metric] if args.metric else \
+            ["FSR_nm", "PeakIL_near_1310_dB", "I_at_-1V_pA"]
+        if args.metric and "," in args.metric:
+            metrics = [m.strip() for m in args.metric.split(",")]
+        plot_center_vs_edge(df, metrics, out)
+    elif args.kind == "vpi":
+        from picqa.viz.uniformity_plot import plot_vpi_distribution
+        df = pd.read_csv(args.input)
+        plot_vpi_distribution(df, out)
+    elif args.kind == "vphi":
+        # Need raw measurement, not CSV
+        from picqa.viz.uniformity_plot import plot_vphi_curve
+        measurements = parse_directory(args.input, test_site="DCM_LMZO")
+        # Pick a representative working die: first one with valid IV
+        target = None
+        for m in measurements:
+            if m.iv is not None and m.sweeps:
+                # Sanity check: leakage at -1V should be > 1nA (working contact)
+                if abs(m.iv.at(-1.0)) > 1e-9:
+                    target = m
+                    break
+        if target is None:
+            print("No working die found for V-phi plot", file=sys.stderr)
+            return 2
+        plot_vphi_curve(target, out)
     else:
         print(f"Unknown plot kind: {args.kind}", file=sys.stderr)
         return 2
@@ -165,6 +201,74 @@ def cmd_yield(args: argparse.Namespace) -> int:
         summary.to_csv(summary_path, index=False)
         print(f"Per-die → {out}")
         print(f"Summary → {summary_path}")
+    return 0
+
+
+def cmd_uniformity(args: argparse.Namespace) -> int:
+    """Project 1: wafer-level uniformity report."""
+    from picqa.analysis.wafer_uniformity import (
+        center_vs_edge,
+        fsr_to_index_variation,
+        iv_uniformity,
+        per_radius_stats,
+    )
+
+    df = pd.read_csv(args.features)
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Center vs edge for grating coupler IL (project 1, item 1)
+    cve_il = center_vs_edge(df, "PeakIL_near_1310_dB",
+                            group_by=["Wafer"])
+    cve_il.to_csv(out_dir / "center_vs_edge_il.csv", index=False)
+
+    # 2. FSR variation (project 1, item 2)
+    fsr_var = fsr_to_index_variation(df, group_by=["Wafer", "Session"])
+    fsr_var.to_csv(out_dir / "fsr_index_variation.csv", index=False)
+
+    # 3. IV uniformity (project 1, item 3)
+    iv_uni = iv_uniformity(df, metric="I_at_-1V_pA",
+                           group_by=["Wafer", "Session"])
+    iv_uni.to_csv(out_dir / "iv_uniformity.csv", index=False)
+
+    # 4. Per-radius FSR stats
+    rad_stats = per_radius_stats(df, "FSR_nm", group_by=["Wafer"])
+    rad_stats.to_csv(out_dir / "fsr_per_radius.csv", index=False)
+
+    print("Center vs edge IL:")
+    print(cve_il.to_string(index=False))
+    print("\nFSR / index variation:")
+    print(fsr_var.to_string(index=False))
+    print("\nIV uniformity (per session):")
+    print(iv_uni.to_string(index=False))
+    print(f"\nAll CSVs saved to {out_dir}")
+    return 0
+
+
+def cmd_phase(args: argparse.Namespace) -> int:
+    """Project 2: extract V-phi metrics (Vπ, Vπ·L, ER)."""
+    from picqa.analysis.phase_extraction import extract_phase_features
+    from picqa.extract.mzm import extract_mzm_features
+    from picqa.analysis.outlier import flag_failed_contacts
+
+    measurements = parse_directory(args.data_dir, test_site="DCM_LMZO")
+    base = extract_mzm_features(measurements)
+    base = flag_failed_contacts(base)
+    augmented = extract_phase_features(measurements, base)
+
+    if args.output:
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        augmented.to_csv(out, index=False)
+        print(f"Saved {len(augmented)} rows → {out}")
+        # Quick console summary
+        working = augmented[~augmented["FailedContact"]]
+        if not working.empty:
+            print(f"\nVπ summary (working dies, n={len(working)}):")
+            print(working.groupby("Wafer")["Vpi_V"].describe()
+                  [["count", "mean", "50%", "std"]].to_string())
+    else:
+        print(augmented.head(15).to_string(index=False))
     return 0
 
 
@@ -214,13 +318,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("plot", help="generate a figure")
     sp.add_argument("kind",
                     choices=["iv", "spectra", "wafermap", "summary",
-                             "pn_length", "pn_summary"])
-    sp.add_argument("input", help="data directory (iv/spectra) or features CSV (others)")
+                             "pn_length", "pn_summary",
+                             "radial", "center_vs_edge", "vpi", "vphi"])
+    sp.add_argument("input", help="data directory or features CSV depending on kind")
     sp.add_argument("--output", "-o", required=True)
     sp.add_argument("--bias", type=float, default=-2.0,
                     help="DC bias for spectra plot (default: -2.0 V)")
     sp.add_argument("--metric", default=None,
-                    help="metric column for wafermap plot")
+                    help="metric column for wafermap/radial/center_vs_edge plots")
     sp.set_defaults(func=cmd_plot)
 
     # yield
@@ -240,6 +345,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--family", default=None,
                     help="spec family name (required if --spec given)")
     sp.set_defaults(func=cmd_report)
+
+    # uniformity (project 1)
+    sp = sub.add_parser("uniformity",
+                        help="wafer-level uniformity analysis (project 1)")
+    sp.add_argument("features", help="MZM features CSV from `picqa extract mzm`")
+    sp.add_argument("--output-dir", "-o", required=True)
+    sp.set_defaults(func=cmd_uniformity)
+
+    # phase (project 2)
+    sp = sub.add_parser("phase",
+                        help="V-phi extraction: Vπ, Vπ·L, ER (project 2)")
+    sp.add_argument("data_dir")
+    sp.add_argument("--output", "-o", default=None)
+    sp.set_defaults(func=cmd_phase)
 
     return p
 
