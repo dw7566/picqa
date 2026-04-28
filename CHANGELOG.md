@@ -1,10 +1,12 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+## [0.2.0] — MZM extraction
+- `extract/mzm.py` — FSR, tuning slope, peak IL, leakage
+- `picqa extract mzm` CLI subcommand
+- Unit tests for MZM extraction
 
 ## [0.1.0] — Foundations
-
 - `pyproject.toml`, CI workflow, license, gitignore
-- `io/schemas.py` — typed data containers (Measurement, IVMeasurement, WavelengthSweep)
+- `io/schemas.py` — typed data containers
 - `io/xml_parser.py` — XML parser with inventory helper
 - Initial unit tests for the IO layer
