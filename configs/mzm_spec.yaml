@@ -1,0 +1,21 @@
+# Example MZM spec for the HY202103 process.
+# Apply with:
+#   picqa yield features.csv --spec configs/mzm_spec.yaml --family mzm -o yield.csv
+
+mzm:
+  # Reverse-bias leakage at -1V should not exceed 1 µA
+  I_at_-1V_pA:
+    max_abs: 1.0e+6
+
+  # Tuning slope must be at least 100 pm/V (in absolute value)
+  dLambda_dV_pm_per_V:
+    min_abs: 100
+
+  # Insertion loss near design wavelength: better than -12 dB
+  PeakIL_near_1310_dB:
+    min: -12
+
+  # FSR within 0.5 nm of the 9.83 nm design target
+  FSR_nm:
+    min: 9.3
+    max: 10.3
