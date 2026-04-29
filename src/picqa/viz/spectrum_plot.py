@@ -59,24 +59,49 @@ def plot_bias_shift(
     measurement: Measurement,
     output_path: str | Path,
     *,
-    zoom_window_nm: tuple[float, float] = (1305, 1320),
+    zoom_window_nm: tuple[float, float] | None = None,
+    full_window_nm: tuple[float, float] | None = None,
 ) -> Path:
-    """Plot all biases of one die, full range and zoomed near design wavelength."""
+    """Plot all biases of one die, full range and zoomed near design wavelength.
+
+    If ``full_window_nm`` or ``zoom_window_nm`` is ``None``, sensible defaults
+    are derived from the measurement's own ``design_wavelength_nm`` so the
+    same call works for O-band (1310 nm) and C-band (1550 nm) devices.
+    """
     if not measurement.sweeps:
         raise ValueError("Measurement has no wavelength sweeps")
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
     sweeps = sorted(measurement.sweeps, key=lambda s: s.dc_bias_v)
+
+    # Derive plot ranges
+    design_wl = measurement.design_wavelength_nm or 1310.0
+    if full_window_nm is None:
+        # ±30 nm around the design wavelength is wide enough to show
+        # several FSRs in either band.
+        full_window_nm = (design_wl - 30.0, design_wl + 30.0)
+    if zoom_window_nm is None:
+        # ±5 nm is enough to see one notch in detail.
+        zoom_window_nm = (design_wl - 5.0, design_wl + 5.0)
+
+    # Snap windows to the actual measured range so we don't draw an empty
+    # left or right margin if the sweep is narrower than ±30 nm.
+    all_L = sweeps[0].wavelength_nm
+    L_min, L_max = float(all_L.min()), float(all_L.max())
+    full_window_nm = (max(full_window_nm[0], L_min),
+                      min(full_window_nm[1], L_max))
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
 
     for sw in sweeps:
         axes[0].plot(sw.wavelength_nm, sw.insertion_loss_db, lw=0.6,
                      label=f"{sw.dc_bias_v:+.1f} V")
-    axes[0].set_xlim(1280, 1340)
+    axes[0].set_xlim(*full_window_nm)
     axes[0].set_ylim(-50, 0)
     axes[0].set_xlabel("Wavelength (nm)")
     axes[0].set_ylabel("IL (dB)")
+    band_str = f" ({measurement.band}-band)" if measurement.band else ""
     axes[0].set_title(
-        f"Bias-dependent spectra: {measurement.wafer}/{measurement.die}"
+        f"Bias-dependent spectra: {measurement.wafer}/{measurement.die}{band_str}"
     )
     axes[0].legend(loc="lower left", ncol=2, fontsize=8)
     axes[0].grid(alpha=0.3)
@@ -88,7 +113,7 @@ def plot_bias_shift(
                      label=f"{sw.dc_bias_v:+.1f} V")
     axes[1].set_xlabel("Wavelength (nm)")
     axes[1].set_ylabel("IL (dB)")
-    axes[1].set_title(f"Zoom: {lo}-{hi} nm")
+    axes[1].set_title(f"Zoom near design wavelength ({design_wl:.0f} nm)")
     axes[1].legend(loc="lower left", ncol=2, fontsize=8)
     axes[1].grid(alpha=0.3)
 
