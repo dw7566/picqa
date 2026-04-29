@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.1] — Device name in CSVs
+- All feature CSVs now include `Device` and `TestSite` columns next to `Die`
+  so it's obvious from a spreadsheet which device each row corresponds to
+  (e.g. `MZMOTE_LULAB_380_500` for an O-band MZM with 380 µm phase shifter)
+- Affects mzm_features.csv, pn_segments.csv, pn_length_fit.csv,
+  phase_features.csv, and the photodetector CSV
+- 9 new test assertions covering the new columns and ordering
+
+
 ## [1.3.0] — Multi-band support
 - Band-agnostic parser auto-detects O / C / E / S / L / U from the XML's
   `WL` design parameter or test-site naming convention (LMZO/LMZC,
