@@ -29,14 +29,14 @@ from picqa.io.pn_schemas import PNMeasurement, PNSegment
 
 logger = logging.getLogger(__name__)
 
-DESIGN_WAVELENGTH_NM = 1310.0
+DEFAULT_DESIGN_WAVELENGTH_NM = 1310.0
 
 
 # ----------------------------------------------------------------------- #
 # Helpers
 # ----------------------------------------------------------------------- #
-def _absorption_slope_db_per_v(seg: PNSegment, near: float = DESIGN_WAVELENGTH_NM) -> float:
-    """Linear fit of IL@1310nm vs DC bias (returns dB/V).
+def _absorption_slope_db_per_v(seg: PNSegment, near: float) -> float:
+    """Linear fit of IL@design_wavelength vs DC bias (returns dB/V).
 
     PN modulators in this dataset are single waveguides without an
     interferometer, so they do not exhibit transmission notches; they modulate
@@ -58,11 +58,15 @@ def _absorption_slope_db_per_v(seg: PNSegment, near: float = DESIGN_WAVELENGTH_N
     return float(slope)
 
 
-def _segment_features(seg: PNSegment, ref_il_at_1310: float | None) -> dict:
-    """Extract metrics for one active segment."""
+def _segment_features(seg: PNSegment, ref_il: float | None,
+                      design_wl_nm: float) -> dict:
+    """Extract metrics for one active segment, using ``design_wl_nm``."""
     out = {
         "Length_um": seg.length_um,
         "PortLabel": seg.port_label,
+        "PeakIL_dB": float("nan"),
+        # Backward-compatible alias for older configs that used the band-
+        # specific column name.
         "PeakIL_at_1310_dB": float("nan"),
         "IL_drop_vs_REF_dB": float("nan"),
         "dIL_dV_dB_per_V": float("nan"),
@@ -72,15 +76,15 @@ def _segment_features(seg: PNSegment, ref_il_at_1310: float | None) -> dict:
 
     sw0 = seg.sweep_at_bias(0.0)
     if sw0 is not None:
-        # IL at 1310 (interpolated, so we don't depend on grid alignment)
-        il_at_1310 = float(np.interp(DESIGN_WAVELENGTH_NM,
-                                     sw0.wavelength_nm,
-                                     sw0.insertion_loss_db))
-        out["PeakIL_at_1310_dB"] = il_at_1310
-        if ref_il_at_1310 is not None and not np.isnan(il_at_1310):
-            out["IL_drop_vs_REF_dB"] = il_at_1310 - ref_il_at_1310
+        il_at_design = float(np.interp(design_wl_nm,
+                                       sw0.wavelength_nm,
+                                       sw0.insertion_loss_db))
+        out["PeakIL_dB"] = il_at_design
+        out["PeakIL_at_1310_dB"] = il_at_design
+        if ref_il is not None and not np.isnan(il_at_design):
+            out["IL_drop_vs_REF_dB"] = il_at_design - ref_il
 
-    out["dIL_dV_dB_per_V"] = _absorption_slope_db_per_v(seg)
+    out["dIL_dV_dB_per_V"] = _absorption_slope_db_per_v(seg, design_wl_nm)
 
     if seg.iv is not None:
         out["I_at_-1V_pA"] = seg.iv.at(-1.0) * 1e12
@@ -90,14 +94,20 @@ def _segment_features(seg: PNSegment, ref_il_at_1310: float | None) -> dict:
 
 
 def extract_pn_segment_features(measurements: list[PNMeasurement]) -> pd.DataFrame:
-    """One row per (die, segment_length)."""
+    """One row per (die, segment_length).
+
+    Uses each measurement's own ``design_wavelength_nm`` so O- and C-band
+    PN modulators can be processed in a single call.
+    """
     rows: list[dict] = []
     for m in measurements:
+        design_wl = m.design_wavelength_nm or DEFAULT_DESIGN_WAVELENGTH_NM
+
         ref_il = None
         if m.reference is not None:
             sw0 = m.reference.sweep_at_bias(0.0)
             if sw0 is not None:
-                ref_il = float(np.interp(DESIGN_WAVELENGTH_NM,
+                ref_il = float(np.interp(design_wl,
                                          sw0.wavelength_nm,
                                          sw0.insertion_loss_db))
 
@@ -108,13 +118,16 @@ def extract_pn_segment_features(measurements: list[PNMeasurement]) -> pd.DataFra
                 "Die": m.die,
                 "DieCol": m.die_col,
                 "DieRow": m.die_row,
+                "Band": m.band,
+                "DesignWavelength_nm": design_wl,
             }
-            base.update(_segment_features(seg, ref_il))
+            base.update(_segment_features(seg, ref_il, design_wl))
             rows.append(base)
 
     columns = [
-        "Wafer", "Session", "Die", "DieCol", "DieRow", "PortLabel",
-        "Length_um", "PeakIL_at_1310_dB", "IL_drop_vs_REF_dB",
+        "Wafer", "Session", "Die", "DieCol", "DieRow",
+        "Band", "DesignWavelength_nm", "PortLabel",
+        "Length_um", "PeakIL_dB", "PeakIL_at_1310_dB", "IL_drop_vs_REF_dB",
         "dIL_dV_dB_per_V",
         "I_at_-1V_pA", "I_at_-2V_pA",
     ]
