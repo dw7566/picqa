@@ -116,6 +116,8 @@ def extract_pn_segment_features(measurements: list[PNMeasurement]) -> pd.DataFra
                 "Wafer": m.wafer,
                 "Session": m.session,
                 "Die": m.die,
+                "Device": m.device_name,
+                "TestSite": m.test_site,
                 "DieCol": m.die_col,
                 "DieRow": m.die_row,
                 "Band": m.band,
@@ -125,7 +127,8 @@ def extract_pn_segment_features(measurements: list[PNMeasurement]) -> pd.DataFra
             rows.append(base)
 
     columns = [
-        "Wafer", "Session", "Die", "DieCol", "DieRow",
+        "Wafer", "Session", "Die", "Device", "TestSite",
+        "DieCol", "DieRow",
         "Band", "DesignWavelength_nm", "PortLabel",
         "Length_um", "PeakIL_dB", "PeakIL_at_1310_dB", "IL_drop_vs_REF_dB",
         "dIL_dV_dB_per_V",
@@ -162,7 +165,8 @@ def extract_pn_length_fit(segment_features: pd.DataFrame) -> pd.DataFrame:
     rows: list[dict] = []
     if segment_features.empty:
         cols = [
-            "Wafer", "Session", "Die", "DieCol", "DieRow",
+            "Wafer", "Session", "Die", "Device", "TestSite",
+            "DieCol", "DieRow", "Band",
             "n_lengths",
             "Loss_per_um_dB_per_um", "Loss_intercept_dB", "Loss_R2",
             "Modulation_per_um_dB_per_V_per_um",
@@ -181,12 +185,17 @@ def extract_pn_length_fit(segment_features: pd.DataFrame) -> pd.DataFrame:
         m_mod, b_mod, r2_mod = _linfit(L, y_mod)
 
         wafer, session, die = keys
-        die_col = int(sub.iloc[0]["DieCol"])
-        die_row = int(sub.iloc[0]["DieRow"])
+        first_row = sub.iloc[0]
+        die_col = int(first_row["DieCol"])
+        die_row = int(first_row["DieRow"])
+        device = str(first_row.get("Device", "")) if "Device" in sub.columns else ""
+        test_site = str(first_row.get("TestSite", "")) if "TestSite" in sub.columns else ""
+        band = str(first_row.get("Band", "")) if "Band" in sub.columns else ""
 
         rows.append({
             "Wafer": wafer, "Session": session, "Die": die,
-            "DieCol": die_col, "DieRow": die_row,
+            "Device": device, "TestSite": test_site,
+            "DieCol": die_col, "DieRow": die_row, "Band": band,
             "n_lengths": len(L),
             "Loss_per_um_dB_per_um": m_loss,
             "Loss_intercept_dB": b_loss,

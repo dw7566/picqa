@@ -33,16 +33,18 @@ def extract_pd_features(measurements: list[Measurement]) -> pd.DataFrame:
                 "Wafer": m.wafer,
                 "Session": m.session,
                 "Die": m.die,
+                "Device": m.device_name,
+                "TestSite": m.test_site,
                 "DieCol": m.die_col,
                 "DieRow": m.die_row,
-                "Device": m.device_name,
                 "I_dark_at_-1V_pA": m.iv.at(-1.0) * 1e12,
                 "I_dark_at_-2V_pA": m.iv.at(-2.0) * 1e12,
             }
         )
 
     columns = [
-        "Wafer", "Session", "Die", "DieCol", "DieRow", "Device",
+        "Wafer", "Session", "Die", "Device", "TestSite",
+        "DieCol", "DieRow",
         "I_dark_at_-1V_pA", "I_dark_at_-2V_pA",
     ]
     if not rows:

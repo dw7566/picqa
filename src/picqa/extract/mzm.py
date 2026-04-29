@@ -51,6 +51,8 @@ class MZMFeatures:
     die: str
     die_col: int
     die_row: int
+    test_site: str
+    device_name: str
     band: str
     design_wavelength_nm: float
     fsr_nm: float
@@ -167,6 +169,8 @@ def extract_one(m: Measurement) -> MZMFeatures | None:
         die=m.die,
         die_col=m.die_col,
         die_row=m.die_row,
+        test_site=m.test_site,
+        device_name=m.device_name,
         band=m.band,
         design_wavelength_nm=design_wl,
         fsr_nm=fsr,
@@ -206,6 +210,8 @@ def extract_mzm_features(
                 "Wafer": feat.wafer,
                 "Session": feat.session,
                 "Die": feat.die,
+                "Device": feat.device_name,
+                "TestSite": feat.test_site,
                 "DieCol": feat.die_col,
                 "DieRow": feat.die_row,
                 "Band": feat.band,
@@ -223,7 +229,8 @@ def extract_mzm_features(
         )
 
     columns = [
-        "Wafer", "Session", "Die", "DieCol", "DieRow",
+        "Wafer", "Session", "Die", "Device", "TestSite",
+        "DieCol", "DieRow",
         "Band", "DesignWavelength_nm",
         "FSR_nm", "Notch_at_0V_nm", "dLambda_dV_pm_per_V",
         "PeakIL_dB", "PeakIL_near_1310_dB",
