@@ -10,6 +10,7 @@ from picqa.viz.uniformity_plot import (
     plot_vphi_curve,
     plot_vpi_distribution,
 )
+from picqa.viz.vpi_analysis import plot_vpi_analysis
 from picqa.viz.wafer_map import plot_wafermap, plot_wafermap_grid
 
 __all__ = [
@@ -27,4 +28,5 @@ __all__ = [
     # project 2
     "plot_vphi_curve",
     "plot_vpi_distribution",
+    "plot_vpi_analysis",
 ]

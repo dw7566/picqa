@@ -136,9 +136,30 @@ def generate_report(
     except Exception:
         fig_paths["spectra"] = None
     try:
-        # bias-shift: pick first measurement that is not flagged as failed contact
+        # bias-shift: prefer a working die where the 0V sweep has at least
+        # 3 clear notches (prominence >= 8 dB), so the figure looks good.
+        from scipy.signal import find_peaks
         good_dies = features[~features["FailedContact"]]
-        if not good_dies.empty:
+        target = None
+        for _, row in good_dies.iterrows():
+            cand = next(
+                (m for m in measurements
+                 if m.wafer == row["Wafer"]
+                 and m.session == row["Session"]
+                 and m.die == row["Die"]),
+                None,
+            )
+            if cand is None:
+                continue
+            sw0 = cand.sweep_at_bias(0.0)
+            if sw0 is None:
+                continue
+            peaks, _ = find_peaks(-sw0.insertion_loss_db, prominence=8.0)
+            if peaks.size >= 3:
+                target = cand
+                break
+        if target is None and not good_dies.empty:
+            # Fall back to the first working die regardless of notches
             row = good_dies.iloc[0]
             target = next(
                 (m for m in measurements
@@ -147,10 +168,8 @@ def generate_report(
                  and m.die == row["Die"]),
                 None,
             )
-            if target:
-                fig_paths["bias"] = plot_bias_shift(target, fig_dir / "bias_shift.png")
-            else:
-                fig_paths["bias"] = None
+        if target is not None:
+            fig_paths["bias"] = plot_bias_shift(target, fig_dir / "bias_shift.png")
         else:
             fig_paths["bias"] = None
     except Exception:
@@ -225,6 +244,7 @@ def generate_report(
     try:
         from picqa.analysis.phase_extraction import extract_phase_features
         from picqa.viz.uniformity_plot import plot_vpi_distribution, plot_vphi_curve
+        from picqa.viz.vpi_analysis import plot_vpi_analysis
         phase_df = extract_phase_features(measurements, features)
         phase_df.to_csv(out_dir / "phase_features.csv", index=False)
         # Pick a representative working die for the V-phi curve
@@ -239,6 +259,13 @@ def generate_report(
             )
             if target is not None:
                 fig_paths["vphi"] = plot_vphi_curve(target, fig_dir / "vphi_curve.png")
+                # Also produce the detailed six-panel V-phi analysis
+                try:
+                    fig_paths["vpi_analysis"] = plot_vpi_analysis(
+                        target, fig_dir / "vpi_analysis.png",
+                    )
+                except Exception:
+                    fig_paths["vpi_analysis"] = None
         fig_paths["vpi_dist"] = plot_vpi_distribution(
             phase_df, fig_dir / "vpi_distribution.png"
         )
@@ -431,6 +458,10 @@ def generate_report(
     if fig_paths.get("vphi"):
         lines.append("### (Project 2) Representative V-φ curve")
         lines.append(f"![V-phi curve]({fig_paths['vphi'].relative_to(out_dir)})")
+        lines.append("")
+    if fig_paths.get("vpi_analysis"):
+        lines.append("### (Project 2) Detailed V-π·L analysis (six panels)")
+        lines.append(f"![Vpi analysis]({fig_paths['vpi_analysis'].relative_to(out_dir)})")
         lines.append("")
     if fig_paths.get("vpi_dist"):
         lines.append("### (Project 2) Vπ distribution and Vπ·L figure of merit")
