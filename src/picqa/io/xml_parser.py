@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
+from picqa.io.bands import band_for_measurement, default_wavelength_for_band
 from picqa.io.schemas import IVMeasurement, Measurement, WavelengthSweep
 
 logger = logging.getLogger(__name__)
@@ -156,6 +157,23 @@ def parse_measurement(path: str | os.PathLike) -> Measurement | None:
         except ValueError:
             align_wl = None
 
+    # Design wavelength: prefer the XML's WL design parameter, fall back to
+    # the band convention encoded in the test-site / device name.
+    design_wl: float | None = None
+    if "WL" in design_params:
+        try:
+            design_wl = float(design_params["WL"])
+        except (TypeError, ValueError):
+            design_wl = None
+
+    band = band_for_measurement(
+        design_wavelength_nm=design_wl,
+        test_site=test_site,
+        device_name=device_name,
+    )
+    if design_wl is None and band:
+        design_wl = default_wavelength_for_band(band)
+
     try:
         die_col = int(info.get("DieColumn", 0))
         die_row = int(info.get("DieRow", 0))
@@ -172,6 +190,8 @@ def parse_measurement(path: str | os.PathLike) -> Measurement | None:
         test_site=test_site,
         device_name=device_name,
         design_params=design_params,
+        design_wavelength_nm=design_wl,
+        band=band,
         iv=iv,
         sweeps=sweeps,
         align_wavelength_nm=align_wl,
@@ -183,7 +203,7 @@ def parse_measurement(path: str | os.PathLike) -> Measurement | None:
 
 def parse_directory(
     data_dir: str | os.PathLike,
-    test_site: str | None = None,
+    test_site: str | list[str] | None = None,
 ) -> list[Measurement]:
     """Parse every XML under ``data_dir``, optionally filtering by test site.
 
@@ -191,24 +211,34 @@ def parse_directory(
     ----------
     data_dir : str | Path
         Root directory containing wafer subfolders (e.g. ``D08``, ``D24``).
-    test_site : str | None
-        If given, only files whose test site matches (case-sensitive) are
-        included (e.g. ``"DCM_LMZO"``).
+    test_site : str | list[str] | None
+        If a single string, only files whose test site matches are included.
+        If a list, any of the listed test sites is accepted (useful for
+        scanning multiple bands in one pass, e.g. ``["DCM_LMZO", "DCM_LMZC"]``).
+        ``None`` parses every XML under the tree.
     """
     root_path = Path(data_dir)
     if not root_path.is_dir():
         raise FileNotFoundError(f"Data directory not found: {root_path}")
 
-    pattern = "**/*.xml"
-    if test_site:
-        pattern = f"**/*_LION1_{test_site}.xml"
+    if isinstance(test_site, str):
+        wanted: set[str] | None = {test_site}
+    elif test_site:
+        wanted = set(test_site)
+    else:
+        wanted = None
 
     measurements: list[Measurement] = []
-    for f in sorted(root_path.glob(pattern)):
+    for f in sorted(root_path.rglob("*.xml")):
+        # Cheap pre-filter on filename to avoid parsing files we'll discard
+        if wanted is not None:
+            m_tag = _TESTSITE_RE.search(f.name)
+            if m_tag and m_tag.group(1) not in wanted:
+                continue
         m = parse_measurement(f)
         if m is None:
             continue
-        if test_site and m.test_site != test_site:
+        if wanted is not None and m.test_site not in wanted:
             continue
         measurements.append(m)
 
