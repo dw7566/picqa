@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.4.0] — Detailed V-π·L analysis figure
+- New `picqa/viz/vpi_analysis.py` reproduces the six-panel V-φ analysis
+  figure used in production silicon photonic characterisation pipelines:
+  measured + reference polynomial / normalised / focus-on-peak /
+  IV / phase-vs-V / Vπ·L-vs-V
+- Notch tracking by wavelength continuity (not depth) so multi-FSR
+  spectra don't lose lock when normalisation flattens the envelope
+- Sub-pm peak localisation via parabolic fit at every bias
+- `plot_bias_shift` now auto-derives plot ranges from the measurement's
+  design wavelength so it works for both O- and C-band devices (fixes
+  empty bias_shift figure for D07)
+- Integrated report's bias_shift target now prefers a die with ≥3 deep
+  notches, ensuring the figure is informative
+- New CLI: `picqa plot vpi_analysis <data-dir> -o file.png`
+- Six-panel figure auto-included in `picqa report` output
+
+
 ## [1.3.1] — Device name in CSVs
 - All feature CSVs now include `Device` and `TestSite` columns next to `Die`
   so it's obvious from a spreadsheet which device each row corresponds to
