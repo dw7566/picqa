@@ -177,6 +177,29 @@ def cmd_plot(args: argparse.Namespace) -> int:
             print("No working die found for V-phi plot", file=sys.stderr)
             return 2
         plot_vphi_curve(target, out)
+    elif args.kind == "vpi_analysis":
+        # Six-panel detailed analysis (project 2, full version)
+        from picqa.viz.vpi_analysis import plot_vpi_analysis
+        measurements = parse_directory(args.input, test_site=list(MZM_TEST_SITES))
+        target = None
+        # Prefer working contact + clear notches (deeper than 10 dB)
+        for m in measurements:
+            if m.iv is None or not m.sweeps:
+                continue
+            if abs(m.iv.at(-1.0)) < 1e-9:
+                continue  # failed contact
+            sw0 = m.sweep_at_bias(0.0)
+            if sw0 is None:
+                continue
+            from scipy.signal import find_peaks
+            peaks, _ = find_peaks(-sw0.insertion_loss_db, prominence=10.0)
+            if peaks.size >= 3:
+                target = m
+                break
+        if target is None:
+            print("No working die with clear notches found", file=sys.stderr)
+            return 2
+        plot_vpi_analysis(target, out)
     else:
         print(f"Unknown plot kind: {args.kind}", file=sys.stderr)
         return 2
@@ -318,7 +341,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("kind",
                     choices=["iv", "spectra", "wafermap", "summary",
                              "pn_length", "pn_summary",
-                             "radial", "center_vs_edge", "vpi", "vphi"])
+                             "radial", "center_vs_edge", "vpi", "vphi",
+                             "vpi_analysis"])
     sp.add_argument("input", help="data directory or features CSV depending on kind")
     sp.add_argument("--output", "-o", required=True)
     sp.add_argument("--bias", type=float, default=-2.0,
