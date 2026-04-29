@@ -49,6 +49,12 @@ class Measurement:
     test_site : test type tag (e.g. ``DCM_LMZO``)
     device_name : design name (e.g. ``MZMOTE_LULAB_380_500``)
     design_params : ``{symbol: value}`` from XML's ``DesignParameter`` blocks
+    design_wavelength_nm : nominal operating wavelength parsed from the XML's
+        ``WL`` design parameter, or inferred from the test-site name when
+        absent (e.g. ``LMZO`` → 1310 nm O-band, ``LMZC`` → 1550 nm C-band).
+        ``None`` if neither source provides one.
+    band : derived telecom band label, one of ``"O"``, ``"C"``, ``"L"``,
+        ``"S"``, ``"E"``, or ``""`` if undetermined.
     iv : optional IV sweep
     sweeps : list of wavelength sweeps (varying bias)
     align_wavelength_nm : alignment laser wavelength
@@ -65,6 +71,8 @@ class Measurement:
     test_site: str = ""
     device_name: str = ""
     design_params: dict[str, str] = field(default_factory=dict)
+    design_wavelength_nm: float | None = None
+    band: str = ""
     iv: IVMeasurement | None = None
     sweeps: list[WavelengthSweep] = field(default_factory=list)
     align_wavelength_nm: float | None = None

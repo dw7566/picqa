@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
+from picqa.io.bands import band_for_measurement, default_wavelength_for_band
 from picqa.io.pn_schemas import PNMeasurement, PNSegment
 from picqa.io.schemas import IVMeasurement, WavelengthSweep
 from picqa.io.xml_parser import _localname, _to_array
@@ -157,13 +158,33 @@ def parse_pn_measurement(path: str | os.PathLike) -> PNMeasurement | None:
     except ValueError:
         return None
 
+    test_site = info.get("TestSite", "")
+    if not test_site:
+        # Fall back to filename match
+        m_tag = re.search(r"_LION1_(.+?)\.xml$", p.name)
+        if m_tag:
+            test_site = m_tag.group(1)
+
+    device_name = mod.attrib.get("Name", "")
+
+    # Design wavelength: PN files don't include WL, but the test-site name
+    # carries the band letter (e.g. PCM_PSLOTE → O-band, PCM_PSLCTE → C-band).
+    band = band_for_measurement(
+        design_wavelength_nm=None,
+        test_site=test_site,
+        device_name=device_name,
+    )
+    design_wl = default_wavelength_for_band(band) if band else None
+
     return PNMeasurement(
         wafer=info.get("Wafer", ""),
         die_col=die_col,
         die_row=die_row,
-        test_site=info.get("TestSite", "PCM_PSLOTE_P1N1"),
-        device_name=mod.attrib.get("Name", ""),
+        test_site=test_site or "PCM_PSLOTE_P1N1",
+        device_name=device_name,
         design_lengths_um=lengths,
+        design_wavelength_nm=design_wl,
+        band=band,
         segments=segments,
         creation_date=root.attrib.get("CreationDate", ""),
         session=p.parent.name,
@@ -171,16 +192,30 @@ def parse_pn_measurement(path: str | os.PathLike) -> PNMeasurement | None:
     )
 
 
-def parse_pn_directory(data_dir: str | os.PathLike) -> list[PNMeasurement]:
-    """Parse every ``PCM_PSLOTE_P1N1`` XML under ``data_dir``."""
+# Test sites that carry the PN-modulator (multi-segment + reference) layout.
+PN_TEST_SITES: tuple[str, ...] = ("PCM_PSLOTE_P1N1", "PCM_PSLCTE_P1N1")
+
+
+def parse_pn_directory(
+    data_dir: str | os.PathLike,
+    *,
+    test_sites: tuple[str, ...] = PN_TEST_SITES,
+) -> list[PNMeasurement]:
+    """Parse every PN modulator XML under ``data_dir``.
+
+    By default this finds both O-band (``PCM_PSLOTE_P1N1``) and C-band
+    (``PCM_PSLCTE_P1N1``) variants. The ``Band`` column on the resulting
+    feature table lets callers split them downstream.
+    """
     root_path = Path(data_dir)
     if not root_path.is_dir():
         raise FileNotFoundError(f"Data directory not found: {root_path}")
 
     measurements: list[PNMeasurement] = []
-    for f in sorted(root_path.glob("**/*_LION1_PCM_PSLOTE_P1N1.xml")):
-        m = parse_pn_measurement(f)
-        if m is not None:
-            measurements.append(m)
+    for ts in test_sites:
+        for f in sorted(root_path.glob(f"**/*_LION1_{ts}.xml")):
+            m = parse_pn_measurement(f)
+            if m is not None:
+                measurements.append(m)
     logger.info("Parsed %d PN measurements", len(measurements))
     return measurements

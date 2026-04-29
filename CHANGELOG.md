@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.3.0] — Multi-band support
+- Band-agnostic parser auto-detects O / C / E / S / L / U from the XML's
+  `WL` design parameter or test-site naming convention (LMZO/LMZC,
+  PSLOTE/PSLCTE, MZMOTE/MZMCTE)
+- New `picqa.io.bands` module with `band_from_wavelength`, `band_from_name`,
+  `band_for_measurement`, `default_wavelength_for_band`
+- `Measurement` and `PNMeasurement` gain `design_wavelength_nm` and `band`
+  fields; extractors use them instead of a hardcoded 1310 nm
+- `parse_directory` now accepts a list of test sites; `MZM_TEST_SITES` and
+  `PN_TEST_SITES` constants drive multi-site scans
+- Feature tables get `Band` and `DesignWavelength_nm` columns; legacy
+  column `PeakIL_near_1310_dB` retained as alias of new `PeakIL_dB`
+- 19 new tests for band detection (62 total)
+- D07 wafer (C-band only) is now part of every analysis without code changes
+
+
 ## [1.2.0] — Projects 1 + 2
 - Wafer-level uniformity analysis (center-vs-edge, radial trends, FSR-to-index, IV uniformity)
 - V-phi extraction: Vπ, Vπ·L, ER from existing dλ/dV data

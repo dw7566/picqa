@@ -58,6 +58,8 @@ class PNMeasurement:
     test_site: str = "PCM_PSLOTE_P1N1"
     device_name: str = ""
     design_lengths_um: list[float] = field(default_factory=list)
+    design_wavelength_nm: float | None = None
+    band: str = ""
     segments: list[PNSegment] = field(default_factory=list)
     creation_date: str = ""
     session: str = ""

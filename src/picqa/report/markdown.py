@@ -14,7 +14,7 @@ import pandas as pd
 from picqa.analysis.outlier import flag_failed_contacts
 from picqa.analysis.statistics import per_group_stats
 from picqa.analysis.yield_calc import Spec, evaluate_yield, yield_summary
-from picqa.extract.mzm import extract_mzm_features
+from picqa.extract.mzm import MZM_TEST_SITES, extract_mzm_features
 from picqa.io.schemas import Measurement
 from picqa.io.xml_parser import inventory, parse_directory
 from picqa.viz.iv_plot import plot_iv_grid
@@ -27,7 +27,7 @@ METRICS_FOR_STATS = [
     "FSR_nm",
     "Notch_at_0V_nm",
     "dLambda_dV_pm_per_V",
-    "PeakIL_near_1310_dB",
+    "PeakIL_dB",
     "I_at_-1V_pA",
 ]
 
@@ -99,7 +99,7 @@ def generate_report(
 
     inv = inventory(data_dir)
     if measurements is None:
-        measurements = parse_directory(data_dir, test_site="DCM_LMZO")
+        measurements = parse_directory(data_dir, test_site=list(MZM_TEST_SITES))
 
     features = extract_mzm_features(measurements)
     features = flag_failed_contacts(features)
@@ -294,11 +294,18 @@ def generate_report(
 
     lines.append("## MZM feature extraction")
     lines.append("")
-    lines.append(f"Extracted {len(features)} MZM measurements from `DCM_LMZO`. "
+    lines.append(f"Extracted {len(features)} MZM measurements from "
+                 f"`DCM_LMZO` (O-band) and `DCM_LMZC` (C-band). "
                  f"Failed-contact flag added via leakage + tuning-slope thresholds.")
     if "FailedContact" in features.columns:
         n_fail = int(features["FailedContact"].sum())
         lines.append(f"Flagged as failed-contact: **{n_fail} / {len(features)}**")
+    if "Band" in features.columns and features["Band"].notna().any():
+        band_counts = features.groupby(["Wafer", "Band"]).size().reset_index(name="n")
+        lines.append("")
+        lines.append("**Wafer × band breakdown:**")
+        lines.append("")
+        lines.append(_df_to_md(band_counts))
     lines.append("")
     lines.append("Sample of features (first 20 rows):")
     lines.append("")

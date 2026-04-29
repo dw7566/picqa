@@ -153,11 +153,14 @@ def extract_phase_features(
             out[col] = pd.Series(dtype=float)
         return out
 
-    # Index measurements for fast lookup by (wafer, session, die)
+    # Index measurements by (wafer, session, die). All MZM-shaped test sites
+    # are eligible; we don't pin to DCM_LMZO any more so C-band (DCM_LMZC)
+    # works too.
+    from picqa.extract.mzm import MZM_TEST_SITES
     meas_by_key = {
         (m.wafer, m.session, m.die): m
         for m in measurements
-        if m.test_site == "DCM_LMZO"
+        if m.test_site in MZM_TEST_SITES
     }
 
     rows: list[dict] = []
@@ -171,23 +174,28 @@ def extract_phase_features(
         fsr = r.get("FSR_nm", float("nan"))
         vpi = vpi_from_slope(slope_nm_per_v, fsr)
 
-        # Vπ·L (cm·V)
+        # Vπ·L (cm·V) — best effort from device name
         L_um = parse_phaseshifter_length_um(m.device_name) if m is not None else float("nan")
         if np.isfinite(vpi) and np.isfinite(L_um):
             vpi_l = vpi * (L_um * 1e-4)  # µm → cm
         else:
             vpi_l = float("nan")
 
-        # ER at two biases
+        # ER computed at the measurement's own design wavelength so the
+        # window stays around 1310 nm for O-band and 1550 nm for C-band.
         er_m2 = float("nan")
         er_0 = float("nan")
         if m is not None:
+            design_wl = (m.design_wavelength_nm
+                         or float(r.get("DesignWavelength_nm", float("nan"))))
+            if not np.isfinite(design_wl):
+                design_wl = 1310.0
             sw_m2 = m.sweep_at_bias(-2.0)
             sw_0 = m.sweep_at_bias(0.0)
             if sw_m2 is not None:
-                er_m2 = extinction_ratio_db(sw_m2)
+                er_m2 = extinction_ratio_db(sw_m2, near_lambda_nm=design_wl)
             if sw_0 is not None:
-                er_0 = extinction_ratio_db(sw_0)
+                er_0 = extinction_ratio_db(sw_0, near_lambda_nm=design_wl)
 
         rows.append({
             "Vpi_V": vpi,
@@ -226,8 +234,9 @@ def vphi_trace(measurement: Measurement) -> pd.DataFrame:
     if notches_0.size == 0:
         return pd.DataFrame(columns=cols)
 
+    design_wl = measurement.design_wavelength_nm or 1310.0
     seed_lambda = float(sw0.wavelength_nm[notches_0[
-        int(np.argmin(np.abs(sw0.wavelength_nm[notches_0] - 1310.0)))
+        int(np.argmin(np.abs(sw0.wavelength_nm[notches_0] - design_wl)))
     ]])
     fsr = float(np.median(np.diff(sw0.wavelength_nm[notches_0]))) \
         if notches_0.size >= 2 else float("nan")

@@ -27,7 +27,7 @@ import pandas as pd
 from picqa import __version__
 from picqa.analysis.outlier import flag_failed_contacts
 from picqa.analysis.yield_calc import evaluate_yield, load_spec, yield_summary
-from picqa.extract.mzm import extract_mzm_features
+from picqa.extract.mzm import MZM_TEST_SITES, extract_mzm_features
 from picqa.extract.photodetector import extract_pd_features
 from picqa.io.xml_parser import inventory, parse_directory
 from picqa.report.markdown import generate_report
@@ -67,8 +67,6 @@ def cmd_parse(args: argparse.Namespace) -> int:
 
 
 def cmd_extract(args: argparse.Namespace) -> int:
-    test_site_map = {"mzm": "DCM_LMZO", "pd": "DCM_GPDO"}
-
     if args.device == "pn":
         # PN modulator uses a different parser/extractor pair because its XML
         # layout (multiple PortCombo segments) doesn't fit the generic
@@ -96,13 +94,14 @@ def cmd_extract(args: argparse.Namespace) -> int:
             print(seg_df.head().to_string(index=False))
         return 0
 
-    test_site = test_site_map.get(args.device)
-    measurements = parse_directory(args.data_dir, test_site=test_site)
-
     if args.device == "mzm":
+        # Pull both O- and C-band MZ modulator sites in one pass.
+        from picqa.extract.mzm import MZM_TEST_SITES
+        measurements = parse_directory(args.data_dir, test_site=list(MZM_TEST_SITES))
         df = extract_mzm_features(measurements)
         df = flag_failed_contacts(df)
     elif args.device == "pd":
+        measurements = parse_directory(args.data_dir, test_site="DCM_GPDO")
         df = extract_pd_features(measurements)
     else:
         print(f"Unknown device: {args.device}", file=sys.stderr)
@@ -123,10 +122,10 @@ def cmd_plot(args: argparse.Namespace) -> int:
     out = Path(args.output)
 
     if args.kind == "iv":
-        measurements = parse_directory(args.input, test_site="DCM_LMZO")
+        measurements = parse_directory(args.input, test_site=list(MZM_TEST_SITES))
         plot_iv_grid(measurements, out)
     elif args.kind == "spectra":
-        measurements = parse_directory(args.input, test_site="DCM_LMZO")
+        measurements = parse_directory(args.input, test_site=list(MZM_TEST_SITES))
         plot_spectra_grid(measurements, out, bias_v=args.bias)
     elif args.kind == "wafermap":
         df = pd.read_csv(args.input)
@@ -165,7 +164,7 @@ def cmd_plot(args: argparse.Namespace) -> int:
     elif args.kind == "vphi":
         # Need raw measurement, not CSV
         from picqa.viz.uniformity_plot import plot_vphi_curve
-        measurements = parse_directory(args.input, test_site="DCM_LMZO")
+        measurements = parse_directory(args.input, test_site=list(MZM_TEST_SITES))
         # Pick a representative working die: first one with valid IV
         target = None
         for m in measurements:
@@ -251,7 +250,7 @@ def cmd_phase(args: argparse.Namespace) -> int:
     from picqa.extract.mzm import extract_mzm_features
     from picqa.analysis.outlier import flag_failed_contacts
 
-    measurements = parse_directory(args.data_dir, test_site="DCM_LMZO")
+    measurements = parse_directory(args.data_dir, test_site=list(MZM_TEST_SITES))
     base = extract_mzm_features(measurements)
     base = flag_failed_contacts(base)
     augmented = extract_phase_features(measurements, base)

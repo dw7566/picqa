@@ -29,9 +29,17 @@ from picqa.io.schemas import Measurement, WavelengthSweep
 
 logger = logging.getLogger(__name__)
 
-DESIGN_WAVELENGTH_NM = 1310.0
+# Default design wavelength used when a measurement doesn't supply one.
+# Real measurements should always carry their own ``design_wavelength_nm``;
+# this is just a sane fallback for synthetic / malformed inputs.
+DEFAULT_DESIGN_WAVELENGTH_NM = 1310.0
 NOTCH_PROMINENCE_DB = 8.0
 ENVELOPE_WINDOW_NM = 4.0
+
+# Test sites that follow the MZ modulator data layout. Adding a new test
+# site name here is enough to fold it into the same extraction pipeline,
+# provided the XML structure matches.
+MZM_TEST_SITES: tuple[str, ...] = ("DCM_LMZO", "DCM_LMZC")
 
 
 @dataclass
@@ -43,10 +51,12 @@ class MZMFeatures:
     die: str
     die_col: int
     die_row: int
+    band: str
+    design_wavelength_nm: float
     fsr_nm: float
     notch_at_0v_nm: float
     dlambda_dv_pm_per_v: float
-    peak_il_near_1310_db: float
+    peak_il_db: float
     i_at_minus_1v_pa: float
     i_at_minus_2v_pa: float
 
@@ -67,7 +77,7 @@ def _find_notches(
 
 def _envelope_il(
     sweep: WavelengthSweep,
-    near_lambda: float = DESIGN_WAVELENGTH_NM,
+    near_lambda: float,
     window_nm: float = ENVELOPE_WINDOW_NM,
 ) -> float:
     """95th-percentile IL inside a wavelength window.
@@ -118,10 +128,14 @@ def extract_one(m: Measurement) -> MZMFeatures | None:
     """Extract features from a single MZM measurement.
 
     Returns ``None`` if the measurement lacks the data needed (no 0V sweep).
+    Uses the measurement's own ``design_wavelength_nm`` so the same code
+    handles O-band, C-band, or any future band without modification.
     """
     sweep0 = m.sweep_at_bias(0.0)
     if sweep0 is None:
         return None
+
+    design_wl = m.design_wavelength_nm or DEFAULT_DESIGN_WAVELENGTH_NM
 
     notches, _ = _find_notches(sweep0.wavelength_nm, sweep0.insertion_loss_db)
 
@@ -131,14 +145,14 @@ def extract_one(m: Measurement) -> MZMFeatures | None:
         fsr = float("nan")
 
     if notches.size > 0:
-        ref_idx = int(np.argmin(np.abs(notches - DESIGN_WAVELENGTH_NM)))
+        ref_idx = int(np.argmin(np.abs(notches - design_wl)))
         notch_at_0v = float(notches[ref_idx])
         slope = _tune_slope_pm_per_v(m.sweeps, fsr, notch_at_0v)
     else:
         notch_at_0v = float("nan")
         slope = float("nan")
 
-    peak_il = _envelope_il(sweep0)
+    peak_il = _envelope_il(sweep0, near_lambda=design_wl)
 
     if m.iv is not None:
         i_m1 = m.iv.at(-1.0) * 1e12  # A → pA
@@ -153,24 +167,36 @@ def extract_one(m: Measurement) -> MZMFeatures | None:
         die=m.die,
         die_col=m.die_col,
         die_row=m.die_row,
+        band=m.band,
+        design_wavelength_nm=design_wl,
         fsr_nm=fsr,
         notch_at_0v_nm=notch_at_0v,
         dlambda_dv_pm_per_v=slope,
-        peak_il_near_1310_db=peak_il,
+        peak_il_db=peak_il,
         i_at_minus_1v_pa=i_m1,
         i_at_minus_2v_pa=i_m2,
     )
 
 
-def extract_mzm_features(measurements: list[Measurement]) -> pd.DataFrame:
+def extract_mzm_features(
+    measurements: list[Measurement],
+    *,
+    test_sites: tuple[str, ...] = MZM_TEST_SITES,
+) -> pd.DataFrame:
     """Extract MZM features from many measurements.
 
-    Only ``test_site == 'DCM_LMZO'`` measurements are processed. Returns an
-    empty DataFrame with the expected columns if no input matches.
+    Parameters
+    ----------
+    measurements : list[Measurement]
+    test_sites : tuple[str, ...]
+        Test-site tags treated as MZ modulators. Defaults to
+        ``("DCM_LMZO", "DCM_LMZC")`` so both O- and C-band Mach-Zehnder
+        sites are folded into one feature table; the ``Band`` and
+        ``DesignWavelength_nm`` columns let callers split them again.
     """
     rows: list[dict] = []
     for m in measurements:
-        if m.test_site != "DCM_LMZO":
+        if m.test_site not in test_sites:
             continue
         feat = extract_one(m)
         if feat is None:
@@ -182,10 +208,15 @@ def extract_mzm_features(measurements: list[Measurement]) -> pd.DataFrame:
                 "Die": feat.die,
                 "DieCol": feat.die_col,
                 "DieRow": feat.die_row,
+                "Band": feat.band,
+                "DesignWavelength_nm": feat.design_wavelength_nm,
                 "FSR_nm": feat.fsr_nm,
                 "Notch_at_0V_nm": feat.notch_at_0v_nm,
                 "dLambda_dV_pm_per_V": feat.dlambda_dv_pm_per_v,
-                "PeakIL_near_1310_dB": feat.peak_il_near_1310_db,
+                "PeakIL_dB": feat.peak_il_db,
+                # Backward-compatible alias for older configs / scripts that
+                # used the band-specific column name.
+                "PeakIL_near_1310_dB": feat.peak_il_db,
                 "I_at_-1V_pA": feat.i_at_minus_1v_pa,
                 "I_at_-2V_pA": feat.i_at_minus_2v_pa,
             }
@@ -193,8 +224,10 @@ def extract_mzm_features(measurements: list[Measurement]) -> pd.DataFrame:
 
     columns = [
         "Wafer", "Session", "Die", "DieCol", "DieRow",
+        "Band", "DesignWavelength_nm",
         "FSR_nm", "Notch_at_0V_nm", "dLambda_dV_pm_per_V",
-        "PeakIL_near_1310_dB", "I_at_-1V_pA", "I_at_-2V_pA",
+        "PeakIL_dB", "PeakIL_near_1310_dB",
+        "I_at_-1V_pA", "I_at_-2V_pA",
     ]
     if not rows:
         return pd.DataFrame(columns=columns)
